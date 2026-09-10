@@ -61,6 +61,16 @@ export interface DesignItem {
   subGroup?: string;
   /** 비고/설명 — 작업 범위·구성 요소·난이도 기준. UI 항목 설명과 PDF/Excel 비고란에 반영. */
   note?: string;
+  /** 고객 표시용 난이도 라벨 (S/A/B/D). 없으면 미표시. 내부 원가 계산에는 관여하지 않음. */
+  difficulty?: 'S' | 'A' | 'B' | 'D';
+  /** 등급 (M1~M5) — 외부가 배율 근거 (참고용 표시). */
+  grade?: string;
+  /** 베리에이션(+50%) 가능 항목 여부. true면 추가안 수량 입력 UI 노출. */
+  variationAllowed?: boolean;
+  /** 캐러셀 여부. true면 "추가 본문 1p = 기본가 5%" 입력 UI 노출. */
+  isCarousel?: boolean;
+  /** 예시 링크 (포트폴리오·레퍼런스 URL). 비면 미표시. masterData.ts에서 편집. */
+  sampleLink?: string;
 }
 
 /** 시뮬레이터 85~86행: 풀(인력 풀) 정의 */
@@ -122,12 +132,38 @@ export interface EstimateInput {
   client: string;
   /** 항목별 월 건수 */
   quantities: QuantityMap;
+  /** 항목별 베리에이션 추가안 수량 (기본가 ×50% × 수량). variationAllowed 항목만. */
+  variations?: QuantityMap;
+  /** 캐러셀 항목별 추가 본문 페이지 수 (기본가 ×5% × 페이지). isCarousel 항목만. */
+  extraPages?: QuantityMap;
   /** F82 공용 배분 비율 (0~1) */
   sharedRatioToA: number;
   /** 풀별 보유 인원 (E85/E86 = D108/D109) */
   poolHeadcount: Record<Exclude<Pool, '공용'>, number>;
   /** 하위 제약 가능 인원 (E89/E90) */
   subHeadcount: Record<string, number>;
+  /** 출장비·실비 옵션 (원가 그대로 가산) */
+  extras?: EstimateExtras;
+}
+
+/** 출장비·AI 실비 등 추가 비용 입력 */
+export interface EstimateExtras {
+  /** 국내 출장 권역 키 ('' = 없음, 'metro'|'central'|'south'|'jeju') */
+  domesticRegion?: string;
+  /** 국내 출장 횟수 */
+  domesticCount?: number;
+  /** 해외 출장 권역 ('' | 'A' | 'B' | 'C') */
+  overseasRegion?: string;
+  /** 해외 출장 인원 */
+  overseasHeadcount?: number;
+  /** 해외 왕복 이동 횟수 (보통 1) */
+  overseasTrips?: number;
+  /** 해외 기타 실비 직접 입력 (숙박·식대·항공·장비 등, 이미 ×1.1 적용된 최종 금액) */
+  overseasExpense?: number;
+  /** AI 크레딧 실비 (사용액, ×1.1 자동 적용) */
+  aiCredit?: number;
+  /** 라이선스·장비 실비 (사용액, ×1.1 자동 적용) */
+  licenseExpense?: number;
 }
 
 /* ───────────────────────────── 출력(Result) ───────────────────────────── */
@@ -146,6 +182,19 @@ export interface LineResult {
   internalCost: number;
   /** I = F × 외부 단가 */
   externalAmount: number;
+  /** 베리에이션 추가안 수량 (variationAllowed 항목만) */
+  variationQty: number;
+  /** 베리에이션 추가 내부/외부 금액 = 단가 × 50% × 수량 */
+  variationInternal: number;
+  variationExternal: number;
+  /** 캐러셀 추가 본문 페이지 수 */
+  extraPageQty: number;
+  /** 추가 페이지 내부/외부 금액 = 단가 × 5% × 페이지 */
+  extraPageInternal: number;
+  extraPageExternal: number;
+  /** 옵션 포함 합계 (내부/외부) = 기본 + 베리에이션 + 추가페이지 */
+  totalInternal: number;
+  totalExternal: number;
 }
 
 /** 85~86행 (공용 배분 반영 풀 집계) */
@@ -201,5 +250,28 @@ export interface EstimateResult {
   summary: SummaryRow[];
   /** 요약 합계 (104행) */
   total: SummaryRow;
+  /** 적용된 할인율 (0.1 = 10%) */
+  discountRate: number;
+  /** 할인 후 총 내부 원가 / 외부 금액 */
+  discountedInternal: number;
+  discountedExternal: number;
+  /** 할인가 기준으로 재산출한 총 리소스 (M/M) */
+  discountedResource: number;
+  /** 할인가 기준 월 투입 일수 */
+  discountedWorkingDays: number;
+  /** 출장비·실비 계산 결과 */
+  extras: ExtrasResult;
   calculatedAt: Date;
+}
+
+/** 출장비·실비 계산 결과 (원가 그대로) */
+export interface ExtrasResult {
+  domestic: number;
+  overseasTravel: number; // 이동 인건비 + 일비 (자동)
+  overseasExpense: number; // 직접 입력 실비
+  aiCredit: number; // ×1.1 적용값
+  licenseExpense: number; // ×1.1 적용값
+  total: number;
+  /** 계산 근거 라벨 (표시용) */
+  lines: { label: string; amount: number }[];
 }

@@ -36,6 +36,12 @@ export interface UseEstimateCalculator {
 
   setQuantity: (itemId: string, qty: number) => void;
   setQuantities: (patch: QuantityMap) => void;
+  /** 베리에이션 추가안 수량 설정 (variationAllowed 항목) */
+  setVariation: (itemId: string, qty: number) => void;
+  /** 캐러셀 추가 본문 페이지 수 설정 (isCarousel 항목) */
+  setExtraPage: (itemId: string, pages: number) => void;
+  /** 출장비·실비 옵션 설정 (부분 갱신) */
+  setExtras: (patch: Partial<import('./types').EstimateExtras>) => void;
   setSharedRatio: (ratio: number) => void;
   setPoolHeadcount: (pool: 'A' | 'B', headcount: number) => void;
   setSubHeadcount: (track: string, headcount: number) => void;
@@ -62,6 +68,13 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
 
   /* ── BehaviorSubject 스트림 (컴포넌트 수명 동안 1개씩만 생성) ── */
   const quantities$ = useRef(new BehaviorSubject<QuantityMap>(initial.quantities)).current;
+  const options$ = useRef(
+    new BehaviorSubject<{ variations: QuantityMap; extraPages: QuantityMap; extras: import('./types').EstimateExtras }>({
+      variations: initial.variations ?? {},
+      extraPages: initial.extraPages ?? {},
+      extras: initial.extras ?? {},
+    }),
+  ).current;
   const ratio$ = useRef(new BehaviorSubject<number>(initial.sharedRatioToA)).current;
   const headcount$ = useRef(
     new BehaviorSubject<HeadcountState>({
@@ -78,11 +91,14 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
 
   /* ── 파이프라인 ── */
   useEffect(() => {
-    const merged$ = combineLatest([quantities$, ratio$, headcount$, meta$]).pipe(
-      map(([quantities, sharedRatioToA, hc, meta]): EstimateInput => ({
+    const merged$ = combineLatest([quantities$, options$, ratio$, headcount$, meta$]).pipe(
+      map(([quantities, options, sharedRatioToA, hc, meta]): EstimateInput => ({
         title: meta.title,
         client: meta.client,
         quantities,
+        variations: options.variations,
+        extraPages: options.extraPages,
+        extras: options.extras,
         sharedRatioToA,
         poolHeadcount: hc.poolHeadcount,
         subHeadcount: hc.subHeadcount,
@@ -117,7 +133,7 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
       inputSub.unsubscribe();
       resultSub.unsubscribe();
     };
-  }, [master, debounceMs, quantities$, ratio$, headcount$, meta$]);
+  }, [master, debounceMs, quantities$, options$, ratio$, headcount$, meta$]);
 
   /* ── 액션 ── */
   const setQuantity = useCallback(
@@ -131,6 +147,29 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
   const setQuantities = useCallback(
     (patch: QuantityMap) => quantities$.next({ ...quantities$.value, ...patch }),
     [quantities$],
+  );
+
+  const setVariation = useCallback(
+    (itemId: string, qty: number) => {
+      const safe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
+      options$.next({ ...options$.value, variations: { ...options$.value.variations, [itemId]: safe } });
+    },
+    [options$],
+  );
+
+  const setExtraPage = useCallback(
+    (itemId: string, pages: number) => {
+      const safe = Number.isFinite(pages) && pages >= 0 ? pages : 0;
+      options$.next({ ...options$.value, extraPages: { ...options$.value.extraPages, [itemId]: safe } });
+    },
+    [options$],
+  );
+
+  const setExtras = useCallback(
+    (patch: Partial<import('./types').EstimateExtras>) => {
+      options$.next({ ...options$.value, extras: { ...options$.value.extras, ...patch } });
+    },
+    [options$],
   );
 
   const setSharedRatio = useCallback(
@@ -162,14 +201,16 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
     const zero: QuantityMap = {};
     master.designItems.forEach((it) => (zero[it.id] = 0));
     quantities$.next(zero);
-  }, [master, quantities$]);
+    options$.next({ variations: {}, extraPages: {}, extras: {} });
+  }, [master, quantities$, options$]);
 
   const reset = useCallback(() => {
     quantities$.next(initial.quantities);
+    options$.next({ variations: initial.variations ?? {}, extraPages: initial.extraPages ?? {}, extras: initial.extras ?? {} });
     ratio$.next(initial.sharedRatioToA);
     headcount$.next({ poolHeadcount: initial.poolHeadcount, subHeadcount: initial.subHeadcount });
     meta$.next({ title: initial.title, client: initial.client });
-  }, [initial, quantities$, ratio$, headcount$, meta$]);
+  }, [initial, quantities$, options$, ratio$, headcount$, meta$]);
 
   return {
     master,
@@ -178,6 +219,9 @@ export function useEstimateCalculator(options: UseEstimateCalculatorOptions = {}
     isCalculating,
     setQuantity,
     setQuantities,
+    setVariation,
+    setExtraPage,
+    setExtras,
     setSharedRatio,
     setPoolHeadcount,
     setSubHeadcount,

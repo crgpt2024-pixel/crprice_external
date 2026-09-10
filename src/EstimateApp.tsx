@@ -16,15 +16,16 @@ import React, { useMemo, useState } from 'react';
 
 import { exportEstimateExcel, exportEstimatePdf, fmtHead, fmtPct, fmtRes, fmtWon } from './exportUtils';
 import { useEstimateCalculator } from './useEstimateCalculator';
+import { DOMESTIC_TRAVEL, OVERSEAS_TRAVEL } from './masterData';
 import type { DesignItem, LineResult, Pool, Verdict } from './types';
 
 /**
  * 내부용 패널(풀별 가동률 · 하위 제약 · 인력 배분 설정) 표시 여부.
- *  ★ 이 파일은 외부용(고객 공개용) 빌드입니다 → false 고정.
- *    내부용 소스에서는 true 입니다. 두 버전은 이 한 줄만 다릅니다.
- * 세 패널만 숨겨지고, 견적 계산·PDF/Excel 내보내기는 내부용과 동일하게 동작합니다.
+ *  - 내부용 사이트: true (기본)
+ *  - 외부용 사이트: false  → .env 파일에 VITE_SHOW_INTERNAL=false 지정하거나 아래 기본값을 false로.
+ * 이 세 패널만 숨겨지고, 견적 계산·PDF/Excel 내보내기는 동일하게 동작합니다.
  */
-const SHOW_INTERNAL_PANELS = false;
+const SHOW_INTERNAL_PANELS = false; // 외부용(사내 타팀용) 빌드 고정
 
 
 const POOL_TITLE: Record<Pool, string> = {
@@ -70,7 +71,22 @@ const CSS = `
   .est-row.active { background:var(--accent-soft); }
   .est-row .name { min-width:0; }
   .est-row .name span { display:block; color:var(--sub); font-size:12px; }
-  .est-row .name span.note { color:var(--accent-strong); font-size:11.5px; margin-top:1px; }
+  .est-row .name span.title { color:var(--ink); font-size:14px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .est-row .name span.meta { color:var(--sub); font-size:12px; }
+  .est-row .name .diff { color:#fff; font-size:10px; font-weight:700; border-radius:4px; padding:1px 6px; line-height:1.5; }
+  .est-row .name .info { border:none; background:none; color:var(--accent); cursor:pointer; font-size:13px; padding:0 2px; }
+  .est-row .name .samplelink { color:var(--accent); font-size:11px; text-decoration:none; border:1px solid var(--accent-soft); border-radius:4px; padding:0 5px; margin-left:2px; }
+  .est-row .name .samplelink:hover { background:var(--accent-soft); }
+  .est-rowwrap { border-bottom:1px solid var(--line); }
+  .est-rowwrap:last-child { border-bottom:0; }
+  .est-rowwrap.active { background:var(--accent-soft); }
+  .est-rowwrap .est-row { border-bottom:0; }
+  .est-info { padding:6px 16px 8px; color:var(--accent-strong); font-size:12px; line-height:1.5; background:rgba(0,0,0,0.015); }
+  .est-opts { display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:4px 16px 10px; }
+  .est-opts .opt { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); }
+  .est-opts .opt input { width:56px; text-align:right; border:1px solid var(--line); border-radius:6px; padding:4px 6px; background:var(--input); }
+  .est-opts .optnote { color:var(--sub); font-size:11px; }
+  .est-opts .optsum { font-size:12px; font-weight:600; color:var(--accent-strong); }
   .est-qty { width:84px; text-align:right; border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:var(--input); }
   .est-num { text-align:right; font-variant-numeric:tabular-nums; }
   .est-num.dim { color:var(--sub); }
@@ -104,6 +120,13 @@ const CSS = `
   .est-set input:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .est-actions { display:flex; gap:8px; }
   .est-actions .est-btn { flex:1; }
+  .est-select { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:var(--input); font:inherit; max-width:160px; }
+  .est-select:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .est-extras-sum { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; font-size:12px; }
+  .est-extras-sum .row { display:flex; justify-content:space-between; gap:10px; padding:2px 0; color:var(--sub); }
+  .est-extras-sum .row b { color:var(--ink); font-variant-numeric:tabular-nums; }
+  .est-extras-sum .row.total { border-top:1px solid var(--line); margin-top:4px; padding-top:6px; font-size:13px; }
+  .est-extras-sum .row.total b { color:var(--accent-strong); }
   .est-status { color:var(--sub); font-size:12px; min-height:18px; }
   .est-empty { padding:32px 16px; color:var(--sub); text-align:center; }
   .est-mobilebar { display:none; }
@@ -153,31 +176,97 @@ const Gauge: React.FC<{ title: string; resource: number; headcount: number; util
   );
 };
 
-const LineRow: React.FC<{ line: LineResult; onChange: (id: string, qty: number) => void }> = React.memo(({ line, onChange }) => {
+const DIFFICULTY_COLOR: Record<string, string> = { S: '#B42318', A: '#B54708', B: '#0F6FB2', D: '#5B6B7C' };
+
+const LineRow: React.FC<{
+  line: LineResult;
+  onChange: (id: string, qty: number) => void;
+  onVariation: (id: string, qty: number) => void;
+  onExtraPage: (id: string, pages: number) => void;
+}> = React.memo(({ line, onChange, onVariation, onExtraPage }) => {
   const { item, qty } = line;
+  const [showInfo, setShowInfo] = useState(false);
+  const hasOptions = qty > 0 && (item.variationAllowed || item.isCarousel);
   return (
-    <div className={`est-row${qty > 0 ? ' active' : ''}`}>
-      <div className="name">
-        {item.name}
-        <span>
-          1건당 {fmtRes(item.resourcePerUnit)} M/M · 내부 {fmtWon(item.internalPrice)} · 외부 {fmtWon(item.externalPrice)}
-        </span>
-        {item.note ? <span className="note">{item.note}</span> : null}
+    <div className={`est-rowwrap${qty > 0 ? ' active' : ''}`}>
+      <div className="est-row">
+        <div className="name">
+          <span className="title">
+            {item.difficulty ? (
+              <b className="diff" style={{ background: DIFFICULTY_COLOR[item.difficulty] }}>
+                {item.difficulty}
+              </b>
+            ) : null}
+            {item.name}
+            {item.sampleLink ? (
+              <a className="samplelink" href={item.sampleLink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                예시↗
+              </a>
+            ) : null}
+            {item.note ? (
+              <button type="button" className="info" aria-label="상세 기준 보기" onClick={() => setShowInfo((v) => !v)}>
+                ⓘ
+              </button>
+            ) : null}
+          </span>
+          <span className="meta">
+            1건당 {fmtRes(item.resourcePerUnit)} M/M · 내부 {fmtWon(item.internalPrice)} · 외부 {fmtWon(item.externalPrice)}
+            {item.grade ? ` · ${item.grade}` : ''}
+          </span>
+        </div>
+        <input
+          className="est-qty"
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          aria-label={`${item.name} 월 건수`}
+          value={qty === 0 ? '' : qty}
+          placeholder="0"
+          onChange={(e) => onChange(item.id, e.target.value === '' ? 0 : Number(e.target.value))}
+        />
+        <div className={`est-num${qty ? '' : ' dim'}`}>{fmtRes(line.resource)}</div>
+        <div className={`est-num${qty ? '' : ' dim'}`}>{fmtWon(line.totalInternal)}</div>
+        <div className={`est-num${qty ? '' : ' dim'}`}>{fmtWon(line.totalExternal)}</div>
       </div>
-      <input
-        className="est-qty"
-        type="number"
-        min={0}
-        step={1}
-        inputMode="numeric"
-        aria-label={`${item.name} 월 건수`}
-        value={qty === 0 ? '' : qty}
-        placeholder="0"
-        onChange={(e) => onChange(item.id, e.target.value === '' ? 0 : Number(e.target.value))}
-      />
-      <div className={`est-num${qty ? '' : ' dim'}`}>{fmtRes(line.resource)}</div>
-      <div className={`est-num${qty ? '' : ' dim'}`}>{fmtWon(line.internalCost)}</div>
-      <div className={`est-num${qty ? '' : ' dim'}`}>{fmtWon(line.externalAmount)}</div>
+
+      {showInfo && item.note ? <div className="est-info">{item.note}</div> : null}
+
+      {hasOptions ? (
+        <div className="est-opts">
+          {item.variationAllowed ? (
+            <label className="opt">
+              베리에이션 추가안
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={line.variationQty === 0 ? '' : line.variationQty}
+                placeholder="0"
+                onChange={(e) => onVariation(item.id, e.target.value === '' ? 0 : Number(e.target.value))}
+              />
+              <span className="optnote">종 · +{fmtWon(Math.round(item.externalPrice * 0.5))}/종 (외부, 50%)</span>
+            </label>
+          ) : null}
+          {item.isCarousel ? (
+            <label className="opt">
+              추가 본문
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={line.extraPageQty === 0 ? '' : line.extraPageQty}
+                placeholder="0"
+                onChange={(e) => onExtraPage(item.id, e.target.value === '' ? 0 : Number(e.target.value))}
+              />
+              <span className="optnote">p · +{fmtWon(Math.round(item.externalPrice * 0.05))}/p (외부, 5%)</span>
+            </label>
+          ) : null}
+          {line.variationExternal + line.extraPageExternal > 0 ? (
+            <span className="optsum">옵션 합계 외부 +{fmtWon(line.variationExternal + line.extraPageExternal)}</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -323,7 +412,7 @@ export default function EstimateApp() {
                   <React.Fragment key={track}>
                     <div className="est-track">{track}</div>
                     {lines.map((line) => (
-                      <LineRow key={line.item.id} line={line} onChange={calc.setQuantity} />
+                      <LineRow key={line.item.id} line={line} onChange={calc.setQuantity} onVariation={calc.setVariation} onExtraPage={calc.setExtraPage} />
                     ))}
                   </React.Fragment>
                 ))}
@@ -338,16 +427,16 @@ export default function EstimateApp() {
             <h2>총 투입 리소스 요약{isCalculating ? ' · 계산 중' : ''}</h2>
             <div className="est-total">
               <div>
-                <div className="k">필요 리소스</div>
+                <div className="k">필요 리소스 (할인가 기준)</div>
                 <div className="v accent">
-                  {fmtRes(result.total.resource)}
+                  {fmtRes(result.discountedResource)}
                   <small>M/M</small>
                 </div>
               </div>
               <div>
                 <div className="k">월 투입 일수</div>
                 <div className="v">
-                  {result.total.workingDays.toFixed(1)}
+                  {result.discountedWorkingDays.toFixed(1)}
                   <small>일</small>
                 </div>
               </div>
@@ -413,6 +502,74 @@ export default function EstimateApp() {
           )}
 
           <section className="est-card">
+            <h2>출장비 · 실비 (원가)</h2>
+            <div className="est-set">
+              <label>국내 출장 권역</label>
+              <select
+                className="est-select"
+                value={input.extras?.domesticRegion ?? ''}
+                onChange={(e) => calc.setExtras({ domesticRegion: e.target.value })}
+              >
+                <option value="">선택 안 함</option>
+                {DOMESTIC_TRAVEL.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.label} ({fmtWon(d.amount)})
+                  </option>
+                ))}
+              </select>
+              {input.extras?.domesticRegion ? (
+                <>
+                  <label>국내 출장 횟수</label>
+                  {numberInput(input.extras?.domesticCount ?? 0, (n) => calc.setExtras({ domesticCount: n }))}
+                </>
+              ) : null}
+
+              <label>해외 출장 권역</label>
+              <select
+                className="est-select"
+                value={input.extras?.overseasRegion ?? ''}
+                onChange={(e) => calc.setExtras({ overseasRegion: e.target.value })}
+              >
+                <option value="">선택 안 함</option>
+                {OVERSEAS_TRAVEL.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {input.extras?.overseasRegion ? (
+                <>
+                  <label>해외 인원</label>
+                  {numberInput(input.extras?.overseasHeadcount ?? 0, (n) => calc.setExtras({ overseasHeadcount: n }))}
+                  <label>해외 왕복 횟수</label>
+                  {numberInput(input.extras?.overseasTrips ?? 0, (n) => calc.setExtras({ overseasTrips: n }))}
+                  <label>해외 기타 실비 (숙박·항공·장비)</label>
+                  {numberInput(input.extras?.overseasExpense ?? 0, (n) => calc.setExtras({ overseasExpense: n }), { step: 100000 })}
+                </>
+              ) : null}
+
+              <label>AI 크레딧 실비 (×1.1 자동)</label>
+              {numberInput(input.extras?.aiCredit ?? 0, (n) => calc.setExtras({ aiCredit: n }), { step: 10000 })}
+              <label>라이선스·장비 실비 (×1.1 자동)</label>
+              {numberInput(input.extras?.licenseExpense ?? 0, (n) => calc.setExtras({ licenseExpense: n }), { step: 10000 })}
+            </div>
+            {result.extras.total > 0 ? (
+              <div className="est-extras-sum">
+                {result.extras.lines.map((l, i) => (
+                  <div key={i} className="row">
+                    <span>{l.label}</span>
+                    <b>{fmtWon(l.amount)}</b>
+                  </div>
+                ))}
+                <div className="row total">
+                  <span>출장비·실비 합계</span>
+                  <b>{fmtWon(result.extras.total)}원</b>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="est-card">
             <h2>내보내기</h2>
             <div className="est-actions">
               <button type="button" className="est-btn primary" disabled={busy !== null} onClick={handlePdf}>
@@ -431,7 +588,7 @@ export default function EstimateApp() {
       <div className="est-mobilebar" role="region" aria-label="요약">
         <div className="nums">
           <b>
-            {fmtRes(result.total.resource)} M/M · {fmtWon(result.total.externalAmount)}원
+            {fmtRes(result.discountedResource)} M/M · {fmtWon(result.total.externalAmount)}원
           </b>
           <span>선택 {selectedCount}건 · 외부 금액 기준</span>
         </div>

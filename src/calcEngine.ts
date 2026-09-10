@@ -32,7 +32,10 @@ import type {
   SummaryRow,
   Verdict,
 } from './types';
-import { SHARED_SUMMARY_LABEL } from './masterData';
+import { SHARED_SUMMARY_LABEL, DISCOUNT_RATE, DOMESTIC_TRAVEL, OVERSEAS_TRAVEL, EXPENSE_MARKUP } from './masterData';
+
+/** 1 M/M 내부원가 기준값 (리소스 역산용) */
+const RESOURCE_UNIT_COST = 7160000;
 
 /** Excel ROUNDUP(x, digits) — 0에서 멀어지는 방향으로 올림 */
 export function excelRoundUp(value: number, digits: number): number {
@@ -73,6 +76,8 @@ export function createDefaultInput(master: MasterData): EstimateInput {
     title: '',
     client: '',
     quantities,
+    variations: {},
+    extraPages: {},
     sharedRatioToA: master.resource.constants.sharedRatioToA,
     poolHeadcount,
     subHeadcount,
@@ -83,15 +88,36 @@ export function calculateEstimate(master: MasterData, input: EstimateInput): Est
   const c = master.resource.constants;
   const ratio = input.sharedRatioToA;
 
-  /* ── 6~80행 ── */
+  /* ── 항목별 라인 (기본 + 베리에이션 + 캐러셀 추가 페이지) ── */
   const lines: LineResult[] = master.designItems.map((item) => {
     const qty = Number(input.quantities[item.id] ?? 0) || 0;
+    const internalCost = qty * item.internalPrice; // H = F*J
+    const externalAmount = qty * item.externalPrice; // I = F*M
+
+    // 베리에이션(+50%): variationAllowed 항목만
+    const variationQty = item.variationAllowed ? Number(input.variations?.[item.id] ?? 0) || 0 : 0;
+    const variationInternal = Math.round(item.internalPrice * 0.5) * variationQty;
+    const variationExternal = Math.round(item.externalPrice * 0.5) * variationQty;
+
+    // 캐러셀 추가 본문 1p = 기본가 × 5%: isCarousel 항목만
+    const extraPageQty = item.isCarousel ? Number(input.extraPages?.[item.id] ?? 0) || 0 : 0;
+    const extraPageInternal = Math.round(item.internalPrice * 0.05) * extraPageQty;
+    const extraPageExternal = Math.round(item.externalPrice * 0.05) * extraPageQty;
+
     return {
       item,
       qty,
-      resource: item.resourcePerUnit * qty,     // G = E*F
-      internalCost: qty * item.internalPrice,   // H = F*J
-      externalAmount: qty * item.externalPrice, // I = F*M
+      resource: item.resourcePerUnit * qty, // G = E*F
+      internalCost,
+      externalAmount,
+      variationQty,
+      variationInternal,
+      variationExternal,
+      extraPageQty,
+      extraPageInternal,
+      extraPageExternal,
+      totalInternal: internalCost + variationInternal + extraPageInternal,
+      totalExternal: externalAmount + variationExternal + extraPageExternal,
     };
   });
 
@@ -137,8 +163,8 @@ export function calculateEstimate(master: MasterData, input: EstimateInput): Est
       resource,
       headcountEquivalent: resource,
       workingDays: resource * c.workingDaysPerMonth,
-      internalCost: byPool(key, (l) => l.internalCost),
-      externalAmount: byPool(key, (l) => l.externalAmount),
+      internalCost: byPool(key, (l) => l.totalInternal),
+      externalAmount: byPool(key, (l) => l.totalExternal),
     };
   };
   const summary: SummaryRow[] = [
@@ -156,5 +182,65 @@ export function calculateEstimate(master: MasterData, input: EstimateInput): Est
     externalAmount: summary.reduce((a, r) => a + r.externalAmount, 0),
   };
 
-  return { input, lines, poolLoads, subConstraints, summary, total, calculatedAt: new Date() };
+  /* ── 할인(10% 고정) 적용 + 할인가 기준 리소스 재산출 ── */
+  const discountRate = DISCOUNT_RATE;
+  const discountedInternal = Math.round(total.internalCost * (1 - discountRate));
+  const discountedExternal = Math.round(total.externalAmount * (1 - discountRate));
+  // 리소스는 할인된 내부 원가를 1 M/M 단가(716만)로 나눠 재산출
+  const discountedResource = discountedInternal / RESOURCE_UNIT_COST;
+  const discountedWorkingDays = discountedResource * c.workingDaysPerMonth;
+
+  /* ── 출장비·실비 계산 (원가 그대로) ── */
+  const ex = input.extras ?? {};
+  const exLines: { label: string; amount: number }[] = [];
+
+  const dRegion = DOMESTIC_TRAVEL.find((d) => d.key === ex.domesticRegion);
+  const domesticCount = Number(ex.domesticCount ?? 0) || 0;
+  const domestic = dRegion ? dRegion.amount * domesticCount : 0;
+  if (domestic > 0) exLines.push({ label: `국내 출장 · ${dRegion!.label} × ${domesticCount}회`, amount: domestic });
+
+  const oRegion = OVERSEAS_TRAVEL.find((o) => o.key === ex.overseasRegion);
+  const oHead = Number(ex.overseasHeadcount ?? 0) || 0;
+  const oTrips = Number(ex.overseasTrips ?? 0) || 0;
+  // 이동 인건비 + 일비(이동일 기준) — 자동. 나머지 실비는 직접 입력.
+  const overseasTravel = oRegion ? (oRegion.roundTripLabor + oRegion.perDiem * oRegion.moveDays) * oHead * oTrips : 0;
+  if (overseasTravel > 0)
+    exLines.push({ label: `해외 출장 · ${oRegion!.label} · ${oHead}인 × ${oTrips}회 (이동비+일비)`, amount: overseasTravel });
+
+  const overseasExpense = Math.round(Number(ex.overseasExpense ?? 0) || 0);
+  if (overseasExpense > 0) exLines.push({ label: '해외 기타 실비 (숙박·항공·장비 등)', amount: overseasExpense });
+
+  const aiCredit = Math.round((Number(ex.aiCredit ?? 0) || 0) * EXPENSE_MARKUP);
+  if (aiCredit > 0) exLines.push({ label: 'AI 크레딧 실비 (×1.1)', amount: aiCredit });
+
+  const licenseExpense = Math.round((Number(ex.licenseExpense ?? 0) || 0) * EXPENSE_MARKUP);
+  if (licenseExpense > 0) exLines.push({ label: '라이선스·장비 실비 (×1.1)', amount: licenseExpense });
+
+  const extrasTotal = domestic + overseasTravel + overseasExpense + aiCredit + licenseExpense;
+
+  const extras = {
+    domestic,
+    overseasTravel,
+    overseasExpense,
+    aiCredit,
+    licenseExpense,
+    total: extrasTotal,
+    lines: exLines,
+  };
+
+  return {
+    input,
+    lines,
+    poolLoads,
+    subConstraints,
+    summary,
+    total,
+    discountRate,
+    discountedInternal,
+    discountedExternal,
+    discountedResource,
+    discountedWorkingDays,
+    extras,
+    calculatedAt: new Date(),
+  };
 }

@@ -19,7 +19,7 @@ import FileSaver from 'file-saver';
 
 const { saveAs } = FileSaver; // CJS 패키지 — 번들러/Node ESM 양쪽에서 안전한 default import
 
-import { CALC_NOTES } from './masterData';
+import { CALC_NOTES, QUOTE_CONDITIONS } from './masterData';
 import type { EstimateResult, LineResult, MasterData, Pool } from './types';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -82,6 +82,10 @@ export interface QuoteModel {
   totalResource: number;
   totalInternal: number;
   totalExternal: number;
+  discountRate: number;
+  discountedInternal: number;
+  discountedExternal: number;
+  extras: EstimateResult['extras'];
   poolSummary: QuotePoolSummary[];
   notes: string[];
 }
@@ -105,16 +109,16 @@ export function buildQuoteModel(result: EstimateResult): QuoteModel {
         key: p as Pool | '합계',
         label: POOL_SUMMARY_LABEL[p],
         resource: ls.reduce((a, l) => a + l.resource, 0),
-        internal: ls.reduce((a, l) => a + l.internalCost, 0),
-        external: ls.reduce((a, l) => a + l.externalAmount, 0),
+        internal: ls.reduce((a, l) => a + l.totalInternal, 0),
+        external: ls.reduce((a, l) => a + l.totalExternal, 0),
       };
     })
     .filter((s) => s.resource > 0 || s.internal > 0);
 
   const totalQty = selected.reduce((a, l) => a + l.qty, 0);
   const totalResource = selected.reduce((a, l) => a + l.resource, 0);
-  const totalInternal = selected.reduce((a, l) => a + l.internalCost, 0);
-  const totalExternal = selected.reduce((a, l) => a + l.externalAmount, 0);
+  const totalInternal = selected.reduce((a, l) => a + l.totalInternal, 0);
+  const totalExternal = selected.reduce((a, l) => a + l.totalExternal, 0);
 
   poolSummary.push({ key: '합계', label: '합계', resource: totalResource, internal: totalInternal, external: totalExternal });
 
@@ -127,6 +131,10 @@ export function buildQuoteModel(result: EstimateResult): QuoteModel {
     totalResource,
     totalInternal,
     totalExternal,
+    discountRate: result.discountRate,
+    discountedInternal: Math.round(totalInternal * (1 - result.discountRate)),
+    discountedExternal: Math.round(totalExternal * (1 - result.discountRate)),
+    extras: result.extras,
     poolSummary,
     notes: CALC_NOTES,
   };
@@ -134,17 +142,20 @@ export function buildQuoteModel(result: EstimateResult): QuoteModel {
 
 function cellText(col: QuoteColumn, r: QuoteRow): string {
   const { line, no } = r;
+  const opts: string[] = [];
+  if (line.variationQty > 0) opts.push(`베리에이션 ${line.variationQty}종`);
+  if (line.extraPageQty > 0) opts.push(`추가 본문 ${line.extraPageQty}p`);
   switch (col.key) {
     case 'no': return String(no);
     case 'pool': return POOL_LABEL[line.item.pool];
     case 'track': return line.item.track;
-    case 'name': return line.item.name;
+    case 'name': return line.item.name + (opts.length ? `  (+${opts.join(', +')})` : '');
     case 'qty': return String(line.qty);
     case 'unitInternal': return fmtWon(line.item.internalPrice);
     case 'unitExternal': return fmtWon(line.item.externalPrice);
     case 'resource': return fmtRes(line.resource);
-    case 'internal': return fmtWon(line.internalCost);
-    case 'external': return fmtWon(line.externalAmount);
+    case 'internal': return fmtWon(line.totalInternal);
+    case 'external': return fmtWon(line.totalExternal);
     default: return '';
   }
 }
@@ -290,10 +301,34 @@ export const EstimateQuoteDocument: React.FC<EstimatePdfProps> = ({ result }) =>
           ))}
         </View>
 
+        {m.extras.total > 0 ? (
+          <>
+            <Text style={s.sectionTitle}>출장비 · 실비 (원가)</Text>
+            <View style={s.table}>
+              {m.extras.lines.map((l, i) => (
+                <View key={i} style={s.tr} wrap={false}>
+                  <Text style={[s.td, { width: '70%' }]}>{l.label}</Text>
+                  <Text style={[s.td, s.right, { width: '30%' }]}>{fmtWon(l.amount)}</Text>
+                </View>
+              ))}
+              <View style={[s.tr, s.total]} wrap={false}>
+                <Text style={[s.td, { width: '70%' }]}>출장비·실비 합계</Text>
+                <Text style={[s.td, s.right, { width: '30%' }]}>{fmtWon(m.extras.total)}</Text>
+              </View>
+            </View>
+          </>
+        ) : null}
+
         <View style={s.notes}>
           <Text style={{ fontWeight: 'bold', marginBottom: 2, color: C.ink }}>산출 근거</Text>
           {m.notes.map((n, i) => (
             <Text key={i}>· {n}</Text>
+          ))}
+        </View>
+        <View style={s.notes} wrap={false}>
+          <Text style={{ fontWeight: 'bold', marginBottom: 2, color: C.accentStrong }}>견적 조건 · 특약</Text>
+          {QUOTE_CONDITIONS.map((n, i) => (
+            <Text key={i} style={{ marginBottom: 1 }}>· {n}</Text>
           ))}
         </View>
         <Footer title={m.title} />
@@ -458,12 +493,43 @@ export function buildEstimateWorkbook(_master: MasterData, result: EstimateResul
   });
 
   let noteRow = sumHeadRow + m.poolSummary.length + 3;
+
+  if (m.extras.total > 0) {
+    ws.getCell(`B${noteRow}`).value = '출장비 · 실비 (원가)';
+    ws.getCell(`B${noteRow}`).font = { ...FONT, bold: true, color: { argb: 'FFD64A14' } };
+    m.extras.lines.forEach((l) => {
+      noteRow += 1;
+      ws.getCell(`B${noteRow}`).value = l.label;
+      ws.getCell(`B${noteRow}`).font = { ...FONT, size: 9 };
+      const c = ws.getCell(`${colLetter('external')}${noteRow}`);
+      c.value = l.amount; c.numFmt = FMT.won; c.font = { ...FONT, size: 9 }; c.alignment = { horizontal: 'right' };
+    });
+    noteRow += 1;
+    ws.getCell(`B${noteRow}`).value = '출장비·실비 합계';
+    ws.getCell(`B${noteRow}`).font = { ...FONT, bold: true };
+    const ct = ws.getCell(`${colLetter('external')}${noteRow}`);
+    ct.value = m.extras.total; ct.numFmt = FMT.won; ct.font = { ...FONT, bold: true }; ct.fill = TOTAL_FILL; ct.alignment = { horizontal: 'right' };
+    noteRow += 2;
+  }
   ws.getCell(`B${noteRow}`).value = '산출 근거';
   ws.getCell(`B${noteRow}`).font = { ...FONT, bold: true };
   m.notes.forEach((n) => {
     noteRow += 1;
     ws.getCell(`B${noteRow}`).value = `· ${n}`;
     ws.getCell(`B${noteRow}`).font = { ...FONT, size: 9, color: { argb: 'FF5B6B7C' } };
+  });
+
+  noteRow += 2;
+  ws.getCell(`B${noteRow}`).value = '견적 조건 · 특약';
+  ws.getCell(`B${noteRow}`).font = { ...FONT, bold: true, color: { argb: 'FFD64A14' } };
+  QUOTE_CONDITIONS.forEach((n) => {
+    noteRow += 1;
+    const cell = ws.getCell(`B${noteRow}`);
+    cell.value = `· ${n}`;
+    cell.font = { ...FONT, size: 9, color: { argb: 'FF5B6B7C' } };
+    cell.alignment = { wrapText: true, vertical: 'top' };
+    ws.mergeCells(`B${noteRow}:${lastCol}${noteRow}`);
+    ws.getRow(noteRow).height = 26;
   });
 
   ws.views = [{ state: 'frozen', ySplit: headRow, showGridLines: false }];
