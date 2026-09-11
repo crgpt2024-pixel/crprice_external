@@ -16,7 +16,7 @@ import React, { useMemo, useState } from 'react';
 
 import { exportEstimateExcel, exportEstimatePdf, fmtHead, fmtPct, fmtRes, fmtWon } from './exportUtils';
 import { useEstimateCalculator } from './useEstimateCalculator';
-import { DOMESTIC_TRAVEL, OVERSEAS_TRAVEL } from './masterData';
+import { DOMESTIC_TRAVEL, OVERSEAS_TRAVEL, GRADE_GUIDE } from './masterData';
 import type { DesignItem, LineResult, Pool, Verdict } from './types';
 
 /**
@@ -51,6 +51,17 @@ const CSS = `
   .est-meta { display:flex; gap:8px; flex-wrap:wrap; }
   .est-meta input { border:1px solid var(--line); border-radius:6px; padding:8px 10px; min-width:220px; background:var(--paper); }
   .est-meta input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .est-grades-wrap { position:relative; }
+  .est-grades-pop { position:absolute; right:0; top:calc(100% + 6px); z-index:20; width:min(420px,88vw);
+    background:var(--paper); border:1px solid var(--line); border-radius:10px; box-shadow:0 12px 40px rgba(31,42,55,.15); padding:14px; }
+  .est-grades-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .est-grades-head button { border:none; background:none; cursor:pointer; color:var(--sub); font-size:14px; }
+  .est-grade-item { display:flex; gap:8px; padding:6px 0; border-top:1px solid var(--line); font-size:12px; line-height:1.5; color:var(--sub); }
+  .est-grade-item .badge { flex:0 0 auto; width:22px; height:22px; border-radius:6px; color:#fff; font-weight:700; font-size:12px; display:flex; align-items:center; justify-content:center; }
+  .est-grade-item .badge[data-g="S"] { background:#B42318; }
+  .est-grade-item .badge[data-g="A"] { background:#B54708; }
+  .est-grade-item .badge[data-g="B"] { background:#0F6FB2; }
+  .est-grade-item .badge[data-g="C"] { background:#5B6B7C; }
   .est-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
   .est-toolbar input[type=search] { flex:1 1 240px; border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:var(--paper); }
   .est-toolbar input[type=search]:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -127,6 +138,8 @@ const CSS = `
   .est-extras-sum .row b { color:var(--ink); font-variant-numeric:tabular-nums; }
   .est-extras-sum .row.total { border-top:1px solid var(--line); margin-top:4px; padding-top:6px; font-size:13px; }
   .est-extras-sum .row.total b { color:var(--accent-strong); }
+  .est-extras-sum .row.grand { border-top:2px solid var(--accent); margin-top:4px; padding-top:6px; font-size:14px; font-weight:700; }
+  .est-extras-sum .row.grand b { color:var(--accent); }
   .est-status { color:var(--sub); font-size:12px; min-height:18px; }
   .est-empty { padding:32px 16px; color:var(--sub); text-align:center; }
   .est-mobilebar { display:none; }
@@ -283,6 +296,7 @@ export default function EstimateApp() {
   const [onlySelected, setOnlySelected] = useState(false);
   const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null);
   const [status, setStatus] = useState('');
+  const [showGrades, setShowGrades] = useState(false);
 
   /* 풀 → 그룹(트랙 또는 트랙·하위구분) → 라인 그룹핑 (필터 적용) */
   const grouped = useMemo(() => {
@@ -366,6 +380,29 @@ export default function EstimateApp() {
           <div className="est-meta">
             <input aria-label="프로젝트명" value={input.title} onChange={(e) => calc.setMeta({ title: e.target.value })} placeholder="프로젝트명 (선택)" />
             <input aria-label="담당팀" value={input.client} onChange={(e) => calc.setMeta({ client: e.target.value })} placeholder="담당팀 (선택)" />
+            <div className="est-grades-wrap">
+              <button type="button" className="est-btn" aria-expanded={showGrades} onClick={() => setShowGrades((v) => !v)}>
+                등급 안내 (S·A·B·C)
+              </button>
+              {showGrades ? (
+                <div className="est-grades-pop" role="dialog" aria-label="난이도 등급 안내">
+                  <div className="est-grades-head">
+                    <b>난이도 등급 안내</b>
+                    <button type="button" onClick={() => setShowGrades(false)} aria-label="닫기">
+                      ✕
+                    </button>
+                  </div>
+                  {GRADE_GUIDE.map((g) => (
+                    <div key={g.grade} className="est-grade-item">
+                      <span className="badge" data-g={g.grade}>
+                        {g.grade}
+                      </span>
+                      <span className="desc">{g.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
 
@@ -564,6 +601,10 @@ export default function EstimateApp() {
                 <div className="row total">
                   <span>출장비·실비 합계</span>
                   <b>{fmtWon(result.extras.total)}원</b>
+                </div>
+                <div className="row grand">
+                  <span>견적 + 출장·실비 (외부)</span>
+                  <b>{fmtWon(result.total.externalAmount + result.extras.total)}원</b>
                 </div>
               </div>
             ) : null}
