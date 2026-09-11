@@ -131,6 +131,10 @@ const CSS = `
   .est-set input:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .est-actions { display:flex; gap:8px; }
   .est-actions .est-btn { flex:1; }
+  .est-fields { display:flex; flex-direction:column; gap:10px; }
+  .est-fields label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--sub); }
+  .est-fields input { border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:var(--paper); font:inherit; color:var(--ink); }
+  .est-fields input:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .est-select { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:var(--input); font:inherit; max-width:160px; }
   .est-select:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .est-extras-sum { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; font-size:12px; }
@@ -378,8 +382,6 @@ export default function EstimateApp() {
             <p>월 건수를 입력하면 소모 리소스(M/M)·내부 원가·외부 금액이 바로 계산됩니다.</p>
           </div>
           <div className="est-meta">
-            <input aria-label="프로젝트명" value={input.title} onChange={(e) => calc.setMeta({ title: e.target.value })} placeholder="프로젝트명 (선택)" />
-            <input aria-label="담당팀" value={input.client} onChange={(e) => calc.setMeta({ client: e.target.value })} placeholder="담당팀 (선택)" />
             <div className="est-grades-wrap">
               <button type="button" className="est-btn" aria-expanded={showGrades} onClick={() => setShowGrades((v) => !v)}>
                 등급 안내 (S·A·B·C)
@@ -608,6 +610,20 @@ export default function EstimateApp() {
                 </div>
               </div>
             ) : null}
+          </section>
+
+          <section className="est-card">
+            <h2>견적서 정보</h2>
+            <div className="est-fields">
+              <label>
+                프로젝트명
+                <input value={input.title} onChange={(e) => calc.setMeta({ title: e.target.value })} placeholder="프로젝트명 (기입)" />
+              </label>
+              <label>
+                담당팀
+                <input value={input.client} onChange={(e) => calc.setMeta({ client: e.target.value })} placeholder="담당팀 (기입)" />
+              </label>
+            </div>
           </section>
 
           <section className="est-card">
