@@ -193,7 +193,7 @@ const Gauge: React.FC<{ title: string; resource: number; headcount: number; util
   );
 };
 
-const DIFFICULTY_COLOR: Record<string, string> = { S: '#B42318', A: '#B54708', B: '#0F6FB2', D: '#5B6B7C' };
+const DIFFICULTY_COLOR: Record<string, string> = { S: '#B42318', A: '#B54708', B: '#0F6FB2', C: '#5B6B7C' };
 
 const LineRow: React.FC<{
   line: LineResult;
@@ -216,9 +216,15 @@ const LineRow: React.FC<{
             ) : null}
             {item.name}
             {item.sampleLink ? (
-              <a className="samplelink" href={item.sampleLink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                예시↗
-              </a>
+              /\.(png|jpe?g|gif|webp|svg|avif)(\?.*)?$/i.test(item.sampleLink) ? (
+                <a className="samplelink" href={item.sampleLink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                  <img src={item.sampleLink} alt="예시" className="samplethumb" style={{ height: 22, borderRadius: 3, marginLeft: 6, verticalAlign: 'middle', border: '1px solid #d9dee6' }} />
+                </a>
+              ) : (
+                <a className="samplelink" href={item.sampleLink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                  예시↗
+                </a>
+              )
             ) : null}
             {item.note ? (
               <button type="button" className="info" aria-label="상세 기준 보기" onClick={() => setShowInfo((v) => !v)}>

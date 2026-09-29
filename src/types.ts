@@ -61,8 +61,8 @@ export interface DesignItem {
   subGroup?: string;
   /** 비고/설명 — 작업 범위·구성 요소·난이도 기준. UI 항목 설명과 PDF/Excel 비고란에 반영. */
   note?: string;
-  /** 고객 표시용 난이도 라벨 (S/A/B/D). 없으면 미표시. 내부 원가 계산에는 관여하지 않음. */
-  difficulty?: 'S' | 'A' | 'B' | 'D';
+  /** 고객 표시용 난이도 라벨 (S/A/B/C). 없으면 미표시. 외부 단가 산정에는 관여하지 않음. */
+  difficulty?: 'S' | 'A' | 'B' | 'C';
   /** 등급 (M1~M5) — 외부가 배율 근거 (참고용 표시). */
   grade?: string;
   /** 베리에이션(+50%) 가능 항목 여부. true면 추가안 수량 입력 UI 노출. */
