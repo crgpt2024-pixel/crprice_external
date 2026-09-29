@@ -12,7 +12,7 @@
  *  │ ┌ 공용 …                                  │ │  · PDF / Excel 내보내기     │
  *  └──────────────────────────────────────────┴───────────────────────────┘
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { exportEstimateExcel, exportEstimatePdf, fmtHead, fmtPct, fmtRes, fmtWon } from './exportUtils';
 import { useEstimateCalculator } from './useEstimateCalculator';
@@ -197,12 +197,14 @@ const DIFFICULTY_COLOR: Record<string, string> = { S: '#B42318', A: '#B54708', B
 
 const LineRow: React.FC<{
   line: LineResult;
+  globalShowInfo: boolean;
   onChange: (id: string, qty: number) => void;
   onVariation: (id: string, qty: number) => void;
   onExtraPage: (id: string, pages: number) => void;
-}> = React.memo(({ line, onChange, onVariation, onExtraPage }) => {
+}> = React.memo(({ line, globalShowInfo, onChange, onVariation, onExtraPage }) => {
   const { item, qty } = line;
-  const [showInfo, setShowInfo] = useState(false);
+  const [showInfo, setShowInfo] = useState(globalShowInfo);
+  useEffect(() => { setShowInfo(globalShowInfo); }, [globalShowInfo]);
   const hasOptions = qty > 0 && (item.variationAllowed || item.isCarousel);
   return (
     <div className={`est-rowwrap${qty > 0 ? ' active' : ''}`}>
@@ -304,6 +306,7 @@ export default function EstimateApp() {
   const [query, setQuery] = useState('');
   const [poolFilter, setPoolFilter] = useState<Pool | 'all'>('all');
   const [onlySelected, setOnlySelected] = useState(false);
+  const [showAllInfo, setShowAllInfo] = useState(false);
   const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null);
   const [status, setStatus] = useState('');
   const [showGrades, setShowGrades] = useState(false);
@@ -432,6 +435,9 @@ export default function EstimateApp() {
             <button type="button" className="est-btn" onClick={calc.reset}>
               엑셀 기본값으로
             </button>
+            <button type="button" className="est-btn" aria-pressed={showAllInfo} onClick={() => setShowAllInfo((v) => !v)}>
+              {showAllInfo ? 'ⓘ 설명 모두 접기' : 'ⓘ 설명 모두 펼치기'}
+            </button>
           </div>
 
           {grouped.size === 0 && <div className="est-card est-empty">조건에 맞는 항목이 없습니다. 검색어나 필터를 바꿔 보세요.</div>}
@@ -457,7 +463,7 @@ export default function EstimateApp() {
                   <React.Fragment key={track}>
                     <div className="est-track">{track}</div>
                     {lines.map((line) => (
-                      <LineRow key={line.item.id} line={line} onChange={calc.setQuantity} onVariation={calc.setVariation} onExtraPage={calc.setExtraPage} />
+                      <LineRow key={line.item.id} line={line} globalShowInfo={showAllInfo} onChange={calc.setQuantity} onVariation={calc.setVariation} onExtraPage={calc.setExtraPage} />
                     ))}
                   </React.Fragment>
                 ))}
