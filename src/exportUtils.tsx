@@ -85,6 +85,8 @@ export interface QuoteModel {
   discountRate: number;
   discountedInternal: number;
   discountedExternal: number;
+  discountedResource: number;
+  discountedWorkingDays: number;
   extras: EstimateResult['extras'];
   poolSummary: QuotePoolSummary[];
   notes: string[];
@@ -134,6 +136,8 @@ export function buildQuoteModel(result: EstimateResult): QuoteModel {
     discountRate: result.discountRate,
     discountedInternal: Math.round(totalInternal * (1 - result.discountRate)),
     discountedExternal: Math.round(totalExternal * (1 - result.discountRate)),
+    discountedResource: result.discountedResource,
+    discountedWorkingDays: result.discountedWorkingDays,
     extras: result.extras,
     poolSummary,
     notes: CALC_NOTES,
@@ -300,6 +304,9 @@ export const EstimateQuoteDocument: React.FC<EstimatePdfProps> = ({ result }) =>
             </View>
           ))}
         </View>
+        <Text style={{ fontSize: 9, marginTop: 6, color: C.accentStrong, fontWeight: 'bold' }}>
+          필요 리소스 ({Math.round(m.discountRate * 100)}% 할인 반영): {fmtRes(m.discountedResource)} M/M · 월 투입 {fmtDays(m.discountedWorkingDays)}
+        </Text>
 
         {m.extras.total > 0 ? (
           <>
@@ -429,16 +436,21 @@ export function buildEstimateWorkbook(_master: MasterData, result: EstimateResul
       cell.value = { formula, result: resultVal } as ExcelJS.CellFormulaValue;
       styleCell(cell, col, { fill: zebra, numFmt });
     };
+    const optNames: string[] = [];
+    if (r.line.variationQty > 0) optNames.push(`베리에이션 ${r.line.variationQty}종`);
+    if (r.line.extraPageQty > 0) optNames.push(`추가 본문 ${r.line.extraPageQty}p`);
+    const surI = r.line.variationInternal + r.line.extraPageInternal;
+    const surE = r.line.variationExternal + r.line.extraPageExternal;
     putV('no', r.no, FMT.int);
     putV('pool', POOL_LABEL[r.line.item.pool]);
     putV('track', r.line.item.track);
-    putV('name', r.line.item.name);
+    putV('name', r.line.item.name + (optNames.length ? `  (+${optNames.join(', +')})` : ''));
     putV('qty', r.line.qty, FMT.int);
     putV('unitInternal', r.line.item.internalPrice, FMT.won);
     putV('unitExternal', r.line.item.externalPrice, FMT.won);
     putF('resource', `${r.line.item.resourcePerUnit}*${qCol}${row}`, r.line.resource, FMT.res);
-    putF('internal', `${qCol}${row}*${uiCol}${row}`, r.line.internalCost, FMT.won);
-    putF('external', `${qCol}${row}*${ueCol}${row}`, r.line.externalAmount, FMT.won);
+    putF('internal', surI ? `${qCol}${row}*${uiCol}${row}+${surI}` : `${qCol}${row}*${uiCol}${row}`, r.line.totalInternal, FMT.won);
+    putF('external', surE ? `${qCol}${row}*${ueCol}${row}+${surE}` : `${qCol}${row}*${ueCol}${row}`, r.line.totalExternal, FMT.won);
   });
 
   const totalRow = dataStart + m.rows.length;
@@ -492,7 +504,23 @@ export function buildEstimateWorkbook(_master: MasterData, result: EstimateResul
     });
   });
 
-  let noteRow = sumHeadRow + m.poolSummary.length + 3;
+  // 필요 리소스 (할인 반영) — 사이트 '필요 리소스'와 동일 값
+  const dispRow = sumHeadRow + m.poolSummary.length + 1;
+  ws.getCell(`B${dispRow}`).value = `필요 리소스 (${Math.round(m.discountRate * 100)}% 할인 반영)`;
+  ws.getCell(`B${dispRow}`).font = { ...FONT, bold: true, color: { argb: ACCENT } };
+  ws.getCell(`B${dispRow}`).border = THIN;
+  ws.getCell(`B${dispRow}`).alignment = { horizontal: 'left', vertical: 'middle' };
+  const rcCell = ws.getCell(`C${dispRow}`);
+  rcCell.value = m.discountedResource; rcCell.numFmt = FMT.res;
+  rcCell.font = { ...FONT, bold: true, color: { argb: ACCENT } };
+  rcCell.border = THIN; rcCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.mergeCells(`D${dispRow}:E${dispRow}`);
+  const dcCell = ws.getCell(`D${dispRow}`);
+  dcCell.value = `월 투입 ${m.discountedWorkingDays.toFixed(1)}일`;
+  dcCell.font = { ...FONT, color: { argb: 'FF5B6B7C' } };
+  dcCell.border = THIN; dcCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  let noteRow = dispRow + 2;
 
   if (m.extras.total > 0) {
     ws.getCell(`B${noteRow}`).value = '출장비 · 실비 (원가)';
